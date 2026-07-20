@@ -70,6 +70,9 @@ Result<OppoFrame> OppoFrame::from_bytes(const uint8_t* data, size_t len) {
             return FrameError::MalformedVarint;
         }
         uint8_t b = data[idx++];
+        if (varint_bytes == 4 && (b & 0x7F) > 0x0F) { // 🛡️ Prevent 32-bit integer promotion overflow
+            return FrameError::MalformedVarint;
+        }
         varint_bytes++;
         rem_len |= static_cast<uint32_t>(b & 0x7F) << shift;
         shift += 7;
@@ -78,7 +81,8 @@ Result<OppoFrame> OppoFrame::from_bytes(const uint8_t* data, size_t len) {
         }
     }
 
-    if (len < idx + rem_len) {
+    // 🛡️ Overflow-safe subtraction bounds checking
+    if (len < idx || rem_len > len - idx) {
         return FrameError::IncompleteFrame;
     }
 
@@ -96,7 +100,7 @@ Result<OppoFrame> OppoFrame::from_bytes(const uint8_t* data, size_t len) {
     uint16_t payload_len = static_cast<uint16_t>(data[inner_offset + 3]) |
                           (static_cast<uint16_t>(data[inner_offset + 4]) << 8);
 
-    // 🛡️ Peer Review Fix 1: Ensure outer varint length perfectly matches inner payload length
+    // 🛡️ Ensure outer varint length perfectly matches inner payload length
     // rem_len == 5 (inner header) + 2 (payload_len LE) + payload_len = 7 + payload_len
     if (rem_len != 7u + static_cast<uint32_t>(payload_len)) {
         return FrameError::MalformedVarint;
@@ -167,6 +171,9 @@ std::vector<OppoFrame> OppoStreamParser::feed(const uint8_t* data, size_t len) {
                 break; // Exceeded 5-byte LEB128 limit -> Malformed
             }
             uint8_t b = buffer_[p_idx++];
+            if (varint_count == 4 && (b & 0x7F) > 0x0F) {
+                break; // Overflow guard on 5th byte
+            }
             varint_count++;
             rem_len |= static_cast<uint32_t>(b & 0x7F) << shift;
             shift += 7;
@@ -176,7 +183,7 @@ std::vector<OppoFrame> OppoStreamParser::feed(const uint8_t* data, size_t len) {
             }
         }
 
-        // 🛡️ Peer Review Fix 2: Distinguish between Malformed Varint (>= 5 bytes) and Incomplete Chunk
+        // Distinguish between Malformed Varint (>= 5 bytes) and Incomplete Chunk
         if (!varint_complete) {
             if (varint_count >= 5) {
                 buffer_.pop_front(); // Malformed, drop fake 0xAA and resync
@@ -202,7 +209,6 @@ std::vector<OppoFrame> OppoStreamParser::feed(const uint8_t* data, size_t len) {
             frames.push_back(res.value());
             buffer_.erase(buffer_.begin(), buffer_.begin() + total_len);
         } else {
-            // 🛡️ Peer Review Fix 3: O(1) buffer pop_front resynchronization
             buffer_.pop_front();
         }
     }
