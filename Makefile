@@ -3,7 +3,7 @@ CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -Iinclude
 
 SRCS = src/protocol.cpp \
        src/messages.cpp \
-       src/transport.cpp \
+       src/transport_linux.cpp \
        src/router.cpp \
        src/device.cpp
 

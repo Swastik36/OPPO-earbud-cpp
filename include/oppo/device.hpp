@@ -3,7 +3,7 @@
 
 #include <string>
 #include <memory>
-#include "transport.hpp"
+#include "itransport.hpp"
 #include "router.hpp"
 #include "messages.hpp"
 
@@ -28,13 +28,15 @@ inline std::string connection_state_to_string(ConnectionState state) {
 
 class OppoDevice {
 private:
-    BluetoothSocket socket_;
-    FrameRouter router_{socket_};
+    std::unique_ptr<ITransport> socket_{create_platform_transport()};
+    FrameRouter router_{*socket_};
     ConnectionState state_{ConnectionState::Disconnected};
     std::string mac_address_;
 
 public:
     OppoDevice() = default;
+    explicit OppoDevice(std::unique_ptr<ITransport> transport)
+        : socket_(std::move(transport)), router_{*socket_} {}
     ~OppoDevice() { disconnect(); }
 
     void set_trace(bool enable) { router_.set_trace(enable); }

@@ -6,7 +6,7 @@ Result<bool> OppoDevice::connect(const std::string& mac_address, uint8_t channel
     mac_address_ = mac_address;
     state_ = ConnectionState::Connecting;
 
-    auto res = socket_.connect(mac_address, channel);
+    auto res = socket_->connect(mac_address, channel);
     if (!res.has_value() || !res.value()) {
         state_ = ConnectionState::Disconnected;
         return res.error();
@@ -17,7 +17,7 @@ Result<bool> OppoDevice::connect(const std::string& mac_address, uint8_t channel
 }
 
 void OppoDevice::disconnect() {
-    socket_.disconnect();
+    socket_->disconnect();
     state_ = ConnectionState::Disconnected;
 }
 

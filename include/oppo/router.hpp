@@ -6,7 +6,7 @@
 #include <deque>
 #include <cstdint>
 #include "protocol.hpp"
-#include "transport.hpp"
+#include "itransport.hpp"
 #include "messages.hpp"
 
 namespace oppo {
@@ -15,7 +15,7 @@ using PushCallback = std::function<void(const OppoFrame&, const OppoMessage&)>;
 
 class FrameRouter {
 private:
-    BluetoothSocket& socket_;
+    ITransport& socket_;
     OppoStreamParser parser_;
     uint8_t current_seq_{1};
     std::vector<PushCallback> push_callbacks_;
@@ -23,7 +23,7 @@ private:
     bool trace_logging_{false};
 
 public:
-    explicit FrameRouter(BluetoothSocket& socket) : socket_(socket) {}
+    explicit FrameRouter(ITransport& socket) : socket_(socket) {}
 
     void set_trace(bool enable) { trace_logging_ = enable; }
     

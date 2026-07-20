@@ -7,14 +7,33 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include_directories(include)
 
-# Core Library
-add_library(oppo_core STATIC
+set(CORE_SOURCES
     src/protocol.cpp
     src/messages.cpp
-    src/transport.cpp
     src/router.cpp
     src/device.cpp
 )
+
+if(UNIX AND NOT APPLE)
+    # Linux Build (BlueZ / POSIX RFCOMM)
+    message(STATUS "[oppo-control] Configuring for Linux (BlueZ / POSIX RFCOMM)")
+    add_library(oppo_core STATIC ${CORE_SOURCES} src/transport_linux.cpp)
+
+elseif(WIN32)
+    # Windows Build (Winsock2 / WS2Bth)
+    message(STATUS "[oppo-control] Configuring for Windows (Winsock2 Bluetooth)")
+    add_library(oppo_core STATIC ${CORE_SOURCES} src/transport_win.cpp)
+    target_link_libraries(oppo_core PUBLIC ws2_32 irprop)
+
+elseif(APPLE)
+    # macOS Build (IOBluetooth Objective-C++)
+    message(STATUS "[oppo-control] Configuring for macOS (IOBluetooth Objective-C++)")
+    enable_language(OBJCXX)
+    add_library(oppo_core STATIC ${CORE_SOURCES} src/transport_mac.mm)
+    find_library(IOBLUETOOTH_FRAMEWORK IOBluetooth)
+    find_library(FOUNDATION_FRAMEWORK Foundation)
+    target_link_libraries(oppo_core PUBLIC ${IOBLUETOOTH_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
+endif()
 
 # CLI Driver Target
 add_executable(oppoctl-cpp src/main_cli.cpp)
