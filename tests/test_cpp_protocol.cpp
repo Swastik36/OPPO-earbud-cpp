@@ -96,6 +96,16 @@ void test_malformed_varint_handling() {
     std::cout << "  [PASS] LEB128 parser trapped 5-byte MSB limit without infinite loop or buffer overflow.\n";
 }
 
+void test_length_contradiction_guard() {
+    std::cout << "[TEST] 6. Two-Lengths Contradiction Guard Check (rem_len != 7 + payload_len)...\n";
+    // Outer varint rem_len = 7, but inner payload_len claims 100 bytes (mismatch!)
+    std::vector<uint8_t> corrupt_len_frame = {0xAA, 0x07, 0x00, 0x00, 0x06, 0x01, 0x01, 0x64, 0x00};
+    auto res = oppo::OppoFrame::from_bytes(corrupt_len_frame);
+    assert(!res.has_value());
+    assert(res.error() == oppo::FrameError::MalformedVarint);
+    std::cout << "  [PASS] Mismatched payload_len vs rem_len caught cleanly.\n";
+}
+
 int main() {
     std::cout << "Running OPPO C++ Protocol Native Test Suite...\n\n";
     test_frame_serialization();
@@ -103,6 +113,7 @@ int main() {
     test_push_battery_decoding();
     test_stream_parser_junk_resync();
     test_malformed_varint_handling();
-    std::cout << "\n[SUCCESS] ALL C++ NATIVE PROTOCOL TESTS PASSED CLEANLY (5/5).\n";
+    test_length_contradiction_guard();
+    std::cout << "\n[SUCCESS] ALL C++ NATIVE PROTOCOL TESTS PASSED CLEANLY (6/6).\n";
     return 0;
 }

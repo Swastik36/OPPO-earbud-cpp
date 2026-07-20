@@ -96,6 +96,12 @@ Result<OppoFrame> OppoFrame::from_bytes(const uint8_t* data, size_t len) {
     uint16_t payload_len = static_cast<uint16_t>(data[inner_offset + 3]) |
                           (static_cast<uint16_t>(data[inner_offset + 4]) << 8);
 
+    // 🛡️ Peer Review Fix 1: Ensure outer varint length perfectly matches inner payload length
+    // rem_len == 5 (inner header) + 2 (payload_len LE) + payload_len = 7 + payload_len
+    if (rem_len != 7u + static_cast<uint32_t>(payload_len)) {
+        return FrameError::MalformedVarint;
+    }
+
     if (inner_offset + 5 + payload_len > len) {
         return FrameError::IncompleteFrame;
     }
@@ -127,7 +133,7 @@ std::vector<OppoFrame> OppoStreamParser::feed(const uint8_t* data, size_t len) {
     std::vector<OppoFrame> frames;
 
     while (true) {
-        // Find next SYNC_BYTE
+        // 1. Find next SYNC_BYTE
         size_t sync_pos = buffer_.size();
         for (size_t i = 0; i < buffer_.size(); ++i) {
             if (buffer_[i] == OppoFrame::SYNC_BYTE) {
@@ -149,52 +155,55 @@ std::vector<OppoFrame> OppoStreamParser::feed(const uint8_t* data, size_t len) {
             break;
         }
 
-        // Try parsing varint length
+        // 2. Parse varint length
         size_t p_idx = 1;
         uint32_t rem_len = 0;
         uint32_t shift = 0;
         size_t varint_count = 0;
-        bool valid_varint = false;
+        bool varint_complete = false;
 
         while (p_idx < buffer_.size()) {
             if (varint_count >= 5) {
-                break;
+                break; // Exceeded 5-byte LEB128 limit -> Malformed
             }
             uint8_t b = buffer_[p_idx++];
             varint_count++;
             rem_len |= static_cast<uint32_t>(b & 0x7F) << shift;
             shift += 7;
             if (!(b & 0x80)) {
-                valid_varint = true;
+                varint_complete = true;
                 break;
             }
         }
 
-        if (!valid_varint) {
-            if (buffer_.size() >= 6) { // Bad varint header, discard corrupted sync byte
-                buffer_.erase(buffer_.begin(), buffer_.begin() + 1);
+        // 🛡️ Peer Review Fix 2: Distinguish between Malformed Varint (>= 5 bytes) and Incomplete Chunk
+        if (!varint_complete) {
+            if (varint_count >= 5) {
+                buffer_.pop_front(); // Malformed, drop fake 0xAA and resync
                 continue;
             }
-            break; // Wait for more data
+            break; // Mid-chunk split: WAIT for next bytes without dropping 0xAA!
         }
 
         size_t total_len = p_idx + rem_len;
         if (rem_len > 512 || (p_idx + 1 < buffer_.size() && (buffer_[p_idx] != 0x00 || buffer_[p_idx + 1] != 0x00))) {
             // Implausible frame size or invalid session ID bytes (0x00 0x00 required)
-            buffer_.erase(buffer_.begin(), buffer_.begin() + 1);
+            buffer_.pop_front();
             continue;
         }
         if (buffer_.size() < total_len) {
-            break;
+            break; // Valid incomplete frame: WAIT for remaining bytes
         }
 
-        std::vector<uint8_t> frame_bytes = std::vector<uint8_t>(buffer_.begin(), buffer_.begin() + total_len);
+        // Copy candidate bytes for parsing
+        std::vector<uint8_t> frame_bytes(buffer_.begin(), buffer_.begin() + total_len);
         auto res = OppoFrame::from_bytes(frame_bytes);
         if (res.has_value()) {
             frames.push_back(res.value());
             buffer_.erase(buffer_.begin(), buffer_.begin() + total_len);
         } else {
-            buffer_.erase(buffer_.begin(), buffer_.begin() + 1);
+            // 🛡️ Peer Review Fix 3: O(1) buffer pop_front resynchronization
+            buffer_.pop_front();
         }
     }
 

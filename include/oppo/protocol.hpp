@@ -2,6 +2,7 @@
 #define OPPO_PROTOCOL_HPP
 
 #include <vector>
+#include <deque>
 #include <cstdint>
 #include <string>
 #include "expected.hpp"
@@ -33,7 +34,7 @@ struct OppoFrame {
 
 class OppoStreamParser {
 private:
-    std::vector<uint8_t> buffer_;
+    std::deque<uint8_t> buffer_;
 
 public:
     OppoStreamParser() = default;
