@@ -35,7 +35,7 @@ EarbudsBattery MessageCodec::parse_battery(const OppoFrame& frame) {
     EarbudsBattery result;
     result.left = {0, false};
     result.right = {0, false};
-    result.case_val = {0, false};
+    result.case_val = {-1, false};
 
     const auto& p = frame.payload;
     if (p.size() < 2) {

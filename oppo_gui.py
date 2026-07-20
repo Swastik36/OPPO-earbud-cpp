@@ -111,25 +111,23 @@ class EarbudController(QObject):
 
     def _parse_battery(self, text):
         try:
-            if "Left:" in text:
-                parts = text.split(",")
-                for p in parts:
-                    if "Left:" in p:
-                        val = int(p.split("%")[0].split("Left:")[1].strip())
-                        chg = "Charging=Yes" in p
-                        self._leftBattery = val
-                        self._leftCharging = chg
-                    elif "Right:" in p:
-                        val = int(p.split("%")[0].split("Right:")[1].strip())
-                        chg = "Charging=Yes" in p
-                        self._rightBattery = val
-                        self._rightCharging = chg
-                    elif "Case:" in p:
-                        val = int(p.split("%")[0].split("Case:")[1].strip())
-                        chg = "Charging=Yes" in p
-                        self._caseBattery = val
-                        self._caseCharging = chg
-                self.batteryChanged.emit()
+            for line in text.splitlines():
+                if "Left Earbud:" in line or "Left:" in line:
+                    val = int(line.split("%")[0].split(":")[-1].strip())
+                    chg = "[Charging: Yes]" in line or "Charging=Yes" in line
+                    self._leftBattery = val
+                    self._leftCharging = chg
+                elif "Right Earbud:" in line or "Right:" in line:
+                    val = int(line.split("%")[0].split(":")[-1].strip())
+                    chg = "[Charging: Yes]" in line or "Charging=Yes" in line
+                    self._rightBattery = val
+                    self._rightCharging = chg
+                elif "Case:" in line:
+                    val = int(line.split("%")[0].split(":")[-1].strip())
+                    chg = "[Charging: Yes]" in line or "Charging=Yes" in line
+                    self._caseBattery = val
+                    self._caseCharging = chg
+            self.batteryChanged.emit()
         except Exception as e:
             print("Battery parse error:", e)
 
