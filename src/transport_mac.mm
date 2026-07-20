@@ -10,19 +10,26 @@
 
 @interface OppoMacBluetoothDelegate : NSObject <IOBluetoothRFCOMMChannelDelegate>
 @property (nonatomic, assign) BOOL isConnected;
-@property (nonatomic, assign) IOBluetoothRFCOMMChannel* channel;
+@property (nonatomic, weak) IOBluetoothRFCOMMChannel* channel;
 @property (nonatomic, strong) NSMutableArray* rxQueue;
 @end
 
 @implementation OppoMacBluetoothDelegate
 - (void)rfcommChannelData:(IOBluetoothRFCOMMChannel*)rfcommChannel data:(void*)dataPointer length:(size_t)dataLength {
-    NSData* data = [NSData dataWithBytes:dataPointer length:dataLength];
-    @synchronized(self.rxQueue) {
-        [self.rxQueue addObject:data];
+    @autoreleasepool {
+        NSData* data = [NSData dataWithBytes:dataPointer length:dataLength];
+        @synchronized(self.rxQueue) {
+            // Bounded drop policy: cap rxQueue to 50 items max to prevent OOM
+            if (self.rxQueue.count >= 50) {
+                [self.rxQueue removeObjectAtIndex:0];
+            }
+            [self.rxQueue addObject:data];
+        }
     }
 }
 
 - (void)rfcommChannelClosed:(IOBluetoothRFCOMMChannel*)rfcommChannel {
+    (void)rfcommChannel;
     self.isConnected = NO;
 }
 @end
@@ -53,7 +60,7 @@ public:
 
         @autoreleasepool {
             std::string clean = normalize_mac(mac_address);
-            NSString* macStr = [NSString stdString:clean];
+            NSString* macStr = [NSString stringWithUTF8String:clean.c_str()];
             IOBluetoothDevice* device = [IOBluetoothDevice deviceWithAddressString:macStr];
 
             if (!device) {
@@ -75,11 +82,13 @@ public:
     void disconnect() override {
         @autoreleasepool {
             if (channel_) {
+                [channel_ setDelegate:nil]; // Safely sever delegate callbacks before closing
                 [channel_ closeChannel];
                 channel_ = nil;
             }
             if (delegate_) {
                 delegate_.isConnected = NO;
+                delegate_.channel = nil;
             }
             connected_ = false;
         }
