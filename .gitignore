@@ -1,0 +1,13 @@
+# Build artifacts
+*.o
+oppoctl-cpp
+test_cpp_protocol
+build/
+
+# Binary test fixtures generator output
+fixtures/*.bin
+
+# System & Editor
+.DS_Store
+*.swp
+*~
