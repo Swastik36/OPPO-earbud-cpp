@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include_directories(include)
 
 set(CORE_SOURCES
+    src/itransport.cpp
     src/protocol.cpp
     src/messages.cpp
     src/router.cpp

@@ -5,9 +5,12 @@
 #include <vector>
 #include <cstdint>
 #include <memory>
-#include <unistd.h>
 #include "expected.hpp"
 #include "itransport.hpp"
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace oppo {
 
@@ -46,7 +49,9 @@ public:
 
     void reset(int new_fd = -1) {
         if (fd_ >= 0) {
+#ifndef _WIN32
             ::close(fd_);
+#endif
         }
         fd_ = new_fd;
     }

@@ -1,7 +1,8 @@
 CXX = g++
 CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -Iinclude
 
-SRCS = src/protocol.cpp \
+SRCS = src/itransport.cpp \
+       src/protocol.cpp \
        src/messages.cpp \
        src/transport_linux.cpp \
        src/router.cpp \

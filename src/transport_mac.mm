@@ -128,5 +128,9 @@ public:
     }
 };
 
+std::unique_ptr<ITransport> create_platform_transport() {
+    return std::make_unique<MacBluetoothTransport>();
+}
+
 } // namespace oppo
 #endif

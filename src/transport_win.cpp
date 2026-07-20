@@ -31,6 +31,7 @@ public:
     }
 
     Result<bool> connect(const std::string& mac_address, uint8_t channel = 15, int timeout_sec = 5) override {
+        (void)timeout_sec;
         disconnect();
 
         if (!wsa_initialized_) {
@@ -91,6 +92,7 @@ public:
     }
 
     Result<std::vector<uint8_t>> receive(size_t max_bytes = 1024, int timeout_ms = 2000) override {
+        (void)timeout_ms;
         if (!connected_ || sock_ == INVALID_SOCKET) return FrameError::SocketError;
         std::vector<uint8_t> buf(max_bytes);
         int ret = ::recv(sock_, reinterpret_cast<char*>(buf.data()), static_cast<int>(max_bytes), 0);
@@ -102,6 +104,10 @@ public:
         return buf;
     }
 };
+
+std::unique_ptr<ITransport> create_platform_transport() {
+    return std::make_unique<WindowsBluetoothTransport>();
+}
 
 } // namespace oppo
 #endif
