@@ -33,17 +33,9 @@ void print_usage() {
 void setup_process_death_guards() {
 #if defined(__linux__)
     // 🛡️ Linux Kernel Parent Death Signal Guard:
-    // Guarantees kernel sends SIGTERM if parent process (Tauri) exits or crashes.
+    // Guarantees kernel sends SIGTERM if parent process (Tauri/Bridge) exits or crashes.
     prctl(PR_SET_PDEATHSIG, SIGTERM);
 #endif
-
-    // 🛡️ Universal Cross-Platform Stdin Pipe Watcher (Linux, Windows, macOS):
-    // Standard input closes automatically when the parent process exits.
-    std::thread pipe_watcher([]() {
-        while (std::cin.get() != EOF) {}
-        std::exit(0);
-    });
-    pipe_watcher.detach();
 }
 
 int main(int argc, char* argv[]) {
@@ -77,7 +69,7 @@ int main(int argc, char* argv[]) {
     oppo::OppoDevice device;
     device.set_trace(trace);
 
-    // Bi-directional Sidecar Streaming Mode for Tauri v2
+    // Bi-directional Sidecar Streaming Mode for Tauri v2 / Web Bridge
     if (command == "stream") {
         std::mutex cout_mutex;
         auto emit_json = [&](const std::string& json_str) {
@@ -122,9 +114,11 @@ int main(int argc, char* argv[]) {
             emit_json(json);
         }
 
-        // Bi-directional command listener on stdin
+        // Bi-directional command listener on main thread stdin
         std::string input_line;
         while (std::getline(std::cin, input_line)) {
+            if (input_line.empty()) continue;
+
             if (input_line.find("set_eq") != std::string::npos) {
                 oppo::EQPreset preset = oppo::EQPreset::ORIGINAL;
                 if (input_line.find("vocals") != std::string::npos || input_line.find("\"preset\":1") != std::string::npos) {
@@ -136,7 +130,7 @@ int main(int argc, char* argv[]) {
                     emit_json("{\"type\":\"eq\",\"preset\":" + std::to_string(static_cast<int>(preset)) + "}");
                 }
             } else if (input_line.find("set_gamemode") != std::string::npos) {
-                bool enable = (input_line.find("true") != std::string::npos || input_line.find("\"enable\":1") != std::string::npos);
+                bool enable = (input_line.find("true") != std::string::npos || input_line.find("\"enable\":1") != std::string::npos || input_line.find("\"enable\":true") != std::string::npos);
                 if (device.set_game_mode(enable).has_value()) {
                     emit_json("{\"type\":\"gamemode\",\"enabled\":" + std::string(enable ? "true" : "false") + "}");
                 }
@@ -155,6 +149,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Clean termination when stdin pipe closes (EOF)
         device.disconnect();
         return 0;
     }
