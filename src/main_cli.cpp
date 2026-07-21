@@ -1,14 +1,23 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <thread>
+#include <mutex>
 #include <algorithm>
+#include <atomic>
 #include "oppo/device.hpp"
 
+#if defined(__linux__)
+    #include <sys/prctl.h>
+    #include <signal.h>
+#endif
+
 void print_usage() {
-    std::cout << "OPPO Enco Buds3 Pro Linux Companion CLI (C++ Native)\n\n"
+    std::cout << "OPPO Enco Buds3 Pro Linux Companion CLI & Sidecar Engine (C++ Native)\n\n"
               << "Usage:\n"
               << "  oppoctl-cpp [options] <command> [args]\n\n"
               << "Commands:\n"
+              << "  stream               Launch bi-directional NDJSON streaming sidecar for Tauri\n"
               << "  info                 Query hardware info and firmware version\n"
               << "  battery              Query real-time battery status (Left, Right, Case)\n"
               << "  eq <preset>          Get or set EQ preset (original, clear_vocals, bass_boost)\n"
@@ -21,7 +30,25 @@ void print_usage() {
               << "  --help               Show this help menu\n";
 }
 
+void setup_process_death_guards() {
+#if defined(__linux__)
+    // 🛡️ Linux Kernel Parent Death Signal Guard:
+    // Guarantees kernel sends SIGTERM if parent process (Tauri) exits or crashes.
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
+#endif
+
+    // 🛡️ Universal Cross-Platform Stdin Pipe Watcher (Linux, Windows, macOS):
+    // Standard input closes automatically when the parent process exits.
+    std::thread pipe_watcher([]() {
+        while (std::cin.get() != EOF) {}
+        std::exit(0);
+    });
+    pipe_watcher.detach();
+}
+
 int main(int argc, char* argv[]) {
+    setup_process_death_guards();
+
     std::string mac_address = "60:55:56:22:49:A0";
     uint8_t channel = 15;
     bool trace = false;
@@ -47,12 +74,94 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "Connecting to OPPO Earbuds [" << mac_address << "] on RFCOMM channel " << static_cast<int>(channel) << "...\n";
-
     oppo::OppoDevice device;
     device.set_trace(trace);
 
-    // Register push notification logger
+    // Bi-directional Sidecar Streaming Mode for Tauri v2
+    if (command == "stream") {
+        std::mutex cout_mutex;
+        auto emit_json = [&](const std::string& json_str) {
+            std::lock_guard<std::mutex> lock(cout_mutex);
+            std::cout << json_str << "\n" << std::flush;
+        };
+
+        emit_json("{\"type\":\"status\",\"state\":\"connecting\",\"mac\":\"" + mac_address + "\"}");
+
+        // Register push notification NDJSON emitter
+        device.register_push_callback([&emit_json](const oppo::OppoFrame&, const oppo::OppoMessage& msg) {
+            if (std::holds_alternative<oppo::EarbudsBattery>(msg)) {
+                const auto& b = std::get<oppo::EarbudsBattery>(msg);
+                std::string json = "{\"type\":\"battery\",\"left\":" + std::to_string(b.left.percentage) +
+                                   ",\"left_charging\":" + (b.left.is_charging ? "true" : "false") +
+                                   ",\"right\":" + std::to_string(b.right.percentage) +
+                                   ",\"right_charging\":" + (b.right.is_charging ? "true" : "false") +
+                                   ",\"case\":" + std::to_string(b.case_val.percentage) +
+                                   ",\"case_charging\":" + (b.case_val.is_charging ? "true" : "false") + "}";
+                emit_json(json);
+            }
+        });
+
+        auto conn_res = device.connect(mac_address, channel);
+        if (!conn_res.has_value()) {
+            emit_json("{\"type\":\"status\",\"state\":\"error\",\"message\":\"Failed to connect to device\"}");
+            return 1;
+        }
+
+        emit_json("{\"type\":\"status\",\"state\":\"connected\",\"mac\":\"" + mac_address + "\"}");
+
+        // Query startup battery status
+        auto b_res = device.get_battery();
+        if (b_res.has_value()) {
+            const auto& b = b_res.value();
+            std::string json = "{\"type\":\"battery\",\"left\":" + std::to_string(b.left.percentage) +
+                               ",\"left_charging\":" + (b.left.is_charging ? "true" : "false") +
+                               ",\"right\":" + std::to_string(b.right.percentage) +
+                               ",\"right_charging\":" + (b.right.is_charging ? "true" : "false") +
+                               ",\"case\":" + std::to_string(b.case_val.percentage) +
+                               ",\"case_charging\":" + (b.case_val.is_charging ? "true" : "false") + "}";
+            emit_json(json);
+        }
+
+        // Bi-directional command listener on stdin
+        std::string input_line;
+        while (std::getline(std::cin, input_line)) {
+            if (input_line.find("set_eq") != std::string::npos) {
+                oppo::EQPreset preset = oppo::EQPreset::ORIGINAL;
+                if (input_line.find("vocals") != std::string::npos || input_line.find("\"preset\":1") != std::string::npos) {
+                    preset = oppo::EQPreset::VOCALS;
+                } else if (input_line.find("bass") != std::string::npos || input_line.find("\"preset\":2") != std::string::npos) {
+                    preset = oppo::EQPreset::BASS;
+                }
+                if (device.set_eq(preset).has_value()) {
+                    emit_json("{\"type\":\"eq\",\"preset\":" + std::to_string(static_cast<int>(preset)) + "}");
+                }
+            } else if (input_line.find("set_gamemode") != std::string::npos) {
+                bool enable = (input_line.find("true") != std::string::npos || input_line.find("\"enable\":1") != std::string::npos);
+                if (device.set_game_mode(enable).has_value()) {
+                    emit_json("{\"type\":\"gamemode\",\"enabled\":" + std::string(enable ? "true" : "false") + "}");
+                }
+            } else if (input_line.find("get_battery") != std::string::npos) {
+                auto bat = device.get_battery();
+                if (bat.has_value()) {
+                    const auto& b = bat.value();
+                    std::string json = "{\"type\":\"battery\",\"left\":" + std::to_string(b.left.percentage) +
+                                       ",\"left_charging\":" + (b.left.is_charging ? "true" : "false") +
+                                       ",\"right\":" + std::to_string(b.right.percentage) +
+                                       ",\"right_charging\":" + (b.right.is_charging ? "true" : "false") +
+                                       ",\"case\":" + std::to_string(b.case_val.percentage) +
+                                       ",\"case_charging\":" + (b.case_val.is_charging ? "true" : "false") + "}";
+                    emit_json(json);
+                }
+            }
+        }
+
+        device.disconnect();
+        return 0;
+    }
+
+    // Standard CLI Driver Mode
+    std::cout << "Connecting to OPPO Earbuds [" << mac_address << "] on RFCOMM channel " << static_cast<int>(channel) << "...\n";
+
     device.register_push_callback([](const oppo::OppoFrame&, const oppo::OppoMessage& msg) {
         if (std::holds_alternative<oppo::EarbudsBattery>(msg)) {
             const auto& b = std::get<oppo::EarbudsBattery>(msg);
