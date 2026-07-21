@@ -58,9 +58,11 @@ Result<OppoFrame> FrameRouter::send_and_receive(const OppoFrame& request, int ti
     auto start_time = std::chrono::steady_clock::now();
 
     while (true) {
-        // Check pending queue for frame with matching sequence ID
+        // Check pending queue for frame with matching sequence ID or matching group
         for (auto it = pending_pushes_.begin(); it != pending_pushes_.end(); ++it) {
-            if (it->seq_id == request.seq_id) {
+            bool matches = (it->seq_id == request.seq_id) ||
+                           (it->group == request.group && (it->cmd_id == request.cmd_id || it->cmd_id == (request.cmd_id | 0x80)));
+            if (matches) {
                 OppoFrame matched = *it;
                 pending_pushes_.erase(it);
                 return matched;
@@ -74,13 +76,15 @@ Result<OppoFrame> FrameRouter::send_and_receive(const OppoFrame& request, int ti
         }
 
         int rem_timeout = static_cast<int>(timeout_ms - elapsed);
-        auto recv_res = socket_.receive(1024, std::min(rem_timeout, 500));
+        auto recv_res = socket_.receive(1024, std::min(rem_timeout, 200));
         if (recv_res.has_value() && !recv_res.value().empty()) {
             const auto& raw = recv_res.value();
             log_hex("RX", raw.data(), raw.size());
             auto parsed_frames = parser_.feed(raw);
             for (const auto& frame : parsed_frames) {
-                if (frame.seq_id == request.seq_id) {
+                bool matches = (frame.seq_id == request.seq_id) ||
+                               (frame.group == request.group && (frame.cmd_id == request.cmd_id || frame.cmd_id == (request.cmd_id | 0x80)));
+                if (matches) {
                     return frame;
                 }
                 dispatch_frame(frame);

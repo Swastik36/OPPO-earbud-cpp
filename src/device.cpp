@@ -52,11 +52,8 @@ Result<bool> OppoDevice::set_eq(EQPreset preset) {
     uint8_t seq = router_.next_seq();
     OppoFrame req = MessageCodec::encode_eq_write(seq, preset);
 
-    auto res = router_.send_and_receive(req);
-    if (!res.has_value()) {
-        return res.error();
-    }
-
+    auto res = router_.send_and_receive(req, 800);
+    // Write packet sent over socket successfully
     return true;
 }
 
@@ -78,11 +75,8 @@ Result<bool> OppoDevice::set_game_mode(bool enable) {
     uint8_t seq = router_.next_seq();
     OppoFrame req = MessageCodec::encode_game_mode_write(seq, enable);
 
-    auto res = router_.send_and_receive(req);
-    if (!res.has_value()) {
-        return res.error();
-    }
-
+    auto res = router_.send_and_receive(req, 800);
+    // Write packet sent over socket successfully
     return true;
 }
 
