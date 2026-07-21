@@ -46,6 +46,8 @@ public:
     Result<bool> connect(const std::string& mac_address = "60:55:56:22:49:A0", uint8_t channel = 15);
     void disconnect();
 
+    void poll_incoming(int timeout_ms = 100);
+
     // High-level API calls
     Result<EarbudsBattery> get_battery();
     Result<EQPreset> get_eq();

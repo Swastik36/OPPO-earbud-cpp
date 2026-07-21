@@ -21,6 +21,12 @@ void OppoDevice::disconnect() {
     state_ = ConnectionState::Disconnected;
 }
 
+void OppoDevice::poll_incoming(int timeout_ms) {
+    if (state_ == ConnectionState::Connected) {
+        router_.poll_incoming(timeout_ms);
+    }
+}
+
 Result<EarbudsBattery> OppoDevice::get_battery() {
     if (state_ != ConnectionState::Connected) return FrameError::SocketError;
     uint8_t seq = router_.next_seq();
@@ -52,9 +58,8 @@ Result<bool> OppoDevice::set_eq(EQPreset preset) {
     uint8_t seq = router_.next_seq();
     OppoFrame req = MessageCodec::encode_eq_write(seq, preset);
 
-    auto res = router_.send_and_receive(req, 800);
-    // Write packet sent over socket successfully
-    return true;
+    auto res = router_.send_and_receive(req, 1500);
+    return res.has_value() || res.error() == FrameError::Timeout;
 }
 
 Result<bool> OppoDevice::get_game_mode() {
@@ -75,9 +80,8 @@ Result<bool> OppoDevice::set_game_mode(bool enable) {
     uint8_t seq = router_.next_seq();
     OppoFrame req = MessageCodec::encode_game_mode_write(seq, enable);
 
-    auto res = router_.send_and_receive(req, 800);
-    // Write packet sent over socket successfully
-    return true;
+    auto res = router_.send_and_receive(req, 1500);
+    return res.has_value() || res.error() == FrameError::Timeout;
 }
 
 Result<TouchGestureList> OppoDevice::get_gestures() {

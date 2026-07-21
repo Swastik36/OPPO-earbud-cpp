@@ -58,7 +58,7 @@ Result<OppoFrame> FrameRouter::send_and_receive(const OppoFrame& request, int ti
     auto start_time = std::chrono::steady_clock::now();
 
     while (true) {
-        // Check pending queue for frame with matching sequence ID or matching group
+        // 1. Check pending queue first for matching sequence or command group
         for (auto it = pending_pushes_.begin(); it != pending_pushes_.end(); ++it) {
             bool matches = (it->seq_id == request.seq_id) ||
                            (it->group == request.group && (it->cmd_id == request.cmd_id || it->cmd_id == (request.cmd_id | 0x80)));
@@ -77,17 +77,37 @@ Result<OppoFrame> FrameRouter::send_and_receive(const OppoFrame& request, int ti
 
         int rem_timeout = static_cast<int>(timeout_ms - elapsed);
         auto recv_res = socket_.receive(1024, std::min(rem_timeout, 200));
-        if (recv_res.has_value() && !recv_res.value().empty()) {
+
+        // 🛡️ Abort immediately on fatal socket error rather than spinning
+        if (!recv_res.has_value()) {
+            if (recv_res.error() != FrameError::Timeout) {
+                return recv_res.error();
+            }
+            continue;
+        }
+
+        if (!recv_res.value().empty()) {
             const auto& raw = recv_res.value();
             log_hex("RX", raw.data(), raw.size());
             auto parsed_frames = parser_.feed(raw);
+            
+            OppoFrame matched_frame;
+            bool found_match = false;
+
+            // 🛡️ Dispatch ALL frames so no telemetry is lost when multiple frames arrive in one buffer
             for (const auto& frame : parsed_frames) {
                 bool matches = (frame.seq_id == request.seq_id) ||
                                (frame.group == request.group && (frame.cmd_id == request.cmd_id || frame.cmd_id == (request.cmd_id | 0x80)));
-                if (matches) {
-                    return frame;
+                if (matches && !found_match) {
+                    matched_frame = frame;
+                    found_match = true;
+                } else {
+                    dispatch_frame(frame);
                 }
-                dispatch_frame(frame);
+            }
+
+            if (found_match) {
+                return matched_frame;
             }
         }
     }

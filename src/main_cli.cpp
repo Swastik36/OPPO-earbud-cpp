@@ -72,6 +72,8 @@ int main(int argc, char* argv[]) {
     // Bi-directional Sidecar Streaming Mode for Tauri v2 / Web Bridge
     if (command == "stream") {
         std::mutex cout_mutex;
+        std::mutex io_mutex;
+
         auto emit_json = [&](const std::string& json_str) {
             std::lock_guard<std::mutex> lock(cout_mutex);
             std::cout << json_str << "\n" << std::flush;
@@ -93,63 +95,82 @@ int main(int argc, char* argv[]) {
             }
         });
 
-        auto conn_res = device.connect(mac_address, channel);
-        if (!conn_res.has_value()) {
-            emit_json("{\"type\":\"status\",\"state\":\"error\",\"message\":\"Failed to connect to device\"}");
-            return 1;
+        {
+            std::lock_guard<std::mutex> lock(io_mutex);
+            auto conn_res = device.connect(mac_address, channel);
+            if (!conn_res.has_value()) {
+                emit_json("{\"type\":\"status\",\"state\":\"error\",\"message\":\"Failed to connect to device\"}");
+                return 1;
+            }
         }
 
         emit_json("{\"type\":\"status\",\"state\":\"connected\",\"mac\":\"" + mac_address + "\"}");
 
         // Query startup battery status
-        auto b_res = device.get_battery();
-        if (b_res.has_value()) {
-            const auto& b = b_res.value();
-            std::string json = "{\"type\":\"battery\",\"left\":" + std::to_string(b.left.percentage) +
-                               ",\"left_charging\":" + (b.left.is_charging ? "true" : "false") +
-                               ",\"right\":" + std::to_string(b.right.percentage) +
-                               ",\"right_charging\":" + (b.right.is_charging ? "true" : "false") +
-                               ",\"case\":" + std::to_string(b.case_val.percentage) +
-                               ",\"case_charging\":" + (b.case_val.is_charging ? "true" : "false") + "}";
-            emit_json(json);
-        }
-
-        // Bi-directional command listener on main thread stdin
-        std::string input_line;
-        while (std::getline(std::cin, input_line)) {
-            if (input_line.empty()) continue;
-
-            if (input_line.find("set_eq") != std::string::npos) {
-                oppo::EQPreset preset = oppo::EQPreset::ORIGINAL;
-                if (input_line.find("vocals") != std::string::npos || input_line.find("\"preset\":1") != std::string::npos) {
-                    preset = oppo::EQPreset::VOCALS;
-                } else if (input_line.find("bass") != std::string::npos || input_line.find("\"preset\":2") != std::string::npos) {
-                    preset = oppo::EQPreset::BASS;
-                }
-                if (device.set_eq(preset).has_value()) {
-                    emit_json("{\"type\":\"eq\",\"preset\":" + std::to_string(static_cast<int>(preset)) + "}");
-                }
-            } else if (input_line.find("set_gamemode") != std::string::npos) {
-                bool enable = (input_line.find("true") != std::string::npos || input_line.find("\"enable\":1") != std::string::npos || input_line.find("\"enable\":true") != std::string::npos);
-                if (device.set_game_mode(enable).has_value()) {
-                    emit_json("{\"type\":\"gamemode\",\"enabled\":" + std::string(enable ? "true" : "false") + "}");
-                }
-            } else if (input_line.find("get_battery") != std::string::npos) {
-                auto bat = device.get_battery();
-                if (bat.has_value()) {
-                    const auto& b = bat.value();
-                    std::string json = "{\"type\":\"battery\",\"left\":" + std::to_string(b.left.percentage) +
-                                       ",\"left_charging\":" + (b.left.is_charging ? "true" : "false") +
-                                       ",\"right\":" + std::to_string(b.right.percentage) +
-                                       ",\"right_charging\":" + (b.right.is_charging ? "true" : "false") +
-                                       ",\"case\":" + std::to_string(b.case_val.percentage) +
-                                       ",\"case_charging\":" + (b.case_val.is_charging ? "true" : "false") + "}";
-                    emit_json(json);
-                }
+        {
+            std::lock_guard<std::mutex> lock(io_mutex);
+            auto b_res = device.get_battery();
+            if (b_res.has_value()) {
+                const auto& b = b_res.value();
+                std::string json = "{\"type\":\"battery\",\"left\":" + std::to_string(b.left.percentage) +
+                                   ",\"left_charging\":" + (b.left.is_charging ? "true" : "false") +
+                                   ",\"right\":" + std::to_string(b.right.percentage) +
+                                   ",\"right_charging\":" + (b.right.is_charging ? "true" : "false") +
+                                   ",\"case\":" + std::to_string(b.case_val.percentage) +
+                                   ",\"case_charging\":" + (b.case_val.is_charging ? "true" : "false") + "}";
+                emit_json(json);
             }
         }
 
-        // Clean termination when stdin pipe closes (EOF)
+        // 1. Thread reading incoming commands from stdin (e.g. from Python bridge or Tauri)
+        std::thread stdin_thread([&device, &io_mutex, &emit_json]() {
+            std::string line;
+            while (std::getline(std::cin, line)) {
+                if (line.empty()) continue;
+
+                std::lock_guard<std::mutex> lock(io_mutex);
+
+                if (line.find("set_eq") != std::string::npos) {
+                    oppo::EQPreset preset = oppo::EQPreset::ORIGINAL;
+                    if (line.find("vocals") != std::string::npos || line.find("\"preset\":1") != std::string::npos) {
+                        preset = oppo::EQPreset::VOCALS;
+                    } else if (line.find("bass") != std::string::npos || line.find("\"preset\":2") != std::string::npos) {
+                        preset = oppo::EQPreset::BASS;
+                    }
+                    if (device.set_eq(preset).has_value()) {
+                        emit_json("{\"type\":\"eq\",\"preset\":" + std::to_string(static_cast<int>(preset)) + "}");
+                    }
+                } else if (line.find("set_gamemode") != std::string::npos) {
+                    bool enable = (line.find("true") != std::string::npos || line.find("\"enable\":1") != std::string::npos || line.find("\"enable\":true") != std::string::npos);
+                    if (device.set_game_mode(enable).has_value()) {
+                        emit_json("{\"type\":\"gamemode\",\"enabled\":" + std::string(enable ? "true" : "false") + "}");
+                    }
+                } else if (line.find("get_battery") != std::string::npos) {
+                    auto bat = device.get_battery();
+                    if (bat.has_value()) {
+                        const auto& b = bat.value();
+                        std::string json = "{\"type\":\"battery\",\"left\":" + std::to_string(b.left.percentage) +
+                                           ",\"left_charging\":" + (b.left.is_charging ? "true" : "false") +
+                                           ",\"right\":" + std::to_string(b.right.percentage) +
+                                           ",\"right_charging\":" + (b.right.is_charging ? "true" : "false") +
+                                           ",\"case\":" + std::to_string(b.case_val.percentage) +
+                                           ",\"case_charging\":" + (b.case_val.is_charging ? "true" : "false") + "}";
+                        emit_json(json);
+                    }
+                }
+            }
+        });
+        stdin_thread.detach();
+
+        // 2. Main thread polling background telemetry
+        while (device.state() == oppo::ConnectionState::Connected) {
+            {
+                std::lock_guard<std::mutex> lock(io_mutex);
+                device.poll_incoming(100);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
         device.disconnect();
         return 0;
     }
